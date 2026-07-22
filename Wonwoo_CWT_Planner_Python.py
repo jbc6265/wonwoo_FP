@@ -13,7 +13,10 @@ from openpyxl import Workbook, load_workbook
 
 APP_TITLE = "원우ENG CWT 생산계획 수립 프로그램"
 APP_VERSION = "20260722_2135"
-PLAN_COLUMNS = ["착수일", "라인", "생산번호(물류번호)", "자재번호", "품명", "모델명", "차대호기", "순번", "연번", "CWT", "RADAR", "설계모델", "소요량", "발주량", "발주번호", "납기일자", "비고"]
+PLAN_COLUMNS = [
+    "착수일", "라인", "생산번호(물류번호)", "자재번호", "품명", "모델명", "차대호기",
+    "순번", "연번", "CWT", "RADAR", "설계모델", "소요량", "발주량", "발주번호", "납기일자", "비고",
+]
 EXCEPTION_COLUMNS = ["예외유형", "라인", "생산번호/물류번호", "영업모델", "자재번호", "사유"]
 
 
@@ -152,7 +155,10 @@ def material_map(headers: list[str]) -> dict:
 def parse_monthly(path: Path, line_type: str, filter_hyundai: bool, exceptions: list[dict]) -> tuple[list[dict], int, int]:
     headers, rows, _ = read_rows(path, 2, ["생산번호", "영업모델", "착수일"])
     c = monthly_map(headers)
-    required = {"production_no": "생산번호", "sales_model": "영업모델", "machine_no": "차대호기", "seq": "순번", "serial": "연번", "line": "라인", "start_date": "착수일", "cwt": "CWT", "design_model": "설계모델", "remark": "비고"}
+    required = {
+        "production_no": "생산번호", "sales_model": "영업모델", "machine_no": "차대호기", "seq": "순번",
+        "serial": "연번", "line": "라인", "start_date": "착수일", "cwt": "CWT", "design_model": "설계모델", "remark": "비고",
+    }
     missing = [name for key, name in required.items() if c.get(key) is None]
     if missing:
         exceptions.append(exception("필수 컬럼 누락", line_type, "", "", "", f"{path.name}: {', '.join(missing)} 컬럼을 찾을 수 없습니다."))
@@ -186,10 +192,18 @@ def parse_monthly(path: Path, line_type: str, filter_hyundai: bool, exceptions: 
     return parsed, len(rows), dx_count
 
 
+def is_line1_logistics(logistics_no: str) -> bool:
+    return logistics_no.startswith(("KPA10", "KSA10"))
+
+
+def is_line2_logistics(logistics_no: str) -> bool:
+    return logistics_no.startswith(("KPA20", "KSA20"))
+
+
 def line_from_logistics(logistics_no: str) -> str:
-    if logistics_no.startswith("KPA10"):
+    if is_line1_logistics(logistics_no):
         return "통합1라인"
-    if logistics_no.startswith("KPA20"):
+    if is_line2_logistics(logistics_no):
         return "통합2라인"
     return "라인 미분류"
 
@@ -265,8 +279,8 @@ def process(line1_path: Path | None, line2_path: Path | None, material_path: Pat
     line1, line1_total, _ = parse_monthly(line1_path, "통합1라인", False, exceptions) if line1_path else ([], 0, 0)
     line2, line2_total, dx_count = parse_monthly(line2_path, "통합2라인", True, exceptions) if line2_path else ([], 0, 0)
     material_all, material_total = parse_material(material_path, exceptions)
-    material_line1 = [m for m in material_all if m["logistics_no"].startswith("KPA10") and "카운터웨이트" in search_text(m["material_name"])]
-    material_line2 = [m for m in material_all if m["logistics_no"].startswith("KPA20") and "카운터웨이트" in search_text(m["material_name"])]
+    material_line1 = [m for m in material_all if is_line1_logistics(m["logistics_no"]) and "카운터웨이트" in search_text(m["material_name"])]
+    material_line2 = [m for m in material_all if is_line2_logistics(m["logistics_no"]) and "카운터웨이트" in search_text(m["material_name"])]
     selected_materials = []
     excluded_materials = []
     if line1_path:
@@ -310,7 +324,22 @@ def process(line1_path: Path | None, line2_path: Path | None, material_path: Pat
     period = "START-END" if not dates else f"{dates[0].replace('-', '')}-{dates[-1].replace('-', '')}"
     period_label = "착수일 없음" if not dates else f"{dates[0]} ~ {dates[-1]}"
     output_path = next_available_path(output_dir / f"원우ENG_CWT_생산계획_{period}.xlsx")
-    summary = [["구분", "건수", "비고"], ["월확정 통합1라인 전체", line1_total, line1_path.name if line1_path else "파일 미선택"], ["월확정 통합1라인 사용", len(line1), "선택 시 전체 사용"], ["월확정 통합2라인 전체", line2_total, line2_path.name if line2_path else "파일 미선택"], ["월확정 통합2라인 현대 제품", len(line2), "HX~/R~"], ["월확정 통합2라인 DX 제외", dx_count, "예외목록 기록"], ["자재소요 전체", material_total, material_path.name], ["자재소요 KPA10 카운터웨이트", len(material_line1), "통합1라인 매칭 대상"], ["자재소요 KPA20 카운터웨이트", len(material_line2), "통합2라인 매칭 대상"], ["선택 라인 제외 자재", len(excluded_materials), "선택되지 않은 월확정 라인의 자재"], ["정상 생산계획", len(plans), "생산계획 시트"], ["예외", len(exceptions), "예외목록 시트"], ["착수기간", period_label, "월확정 착수일 기준"], ["앱 버전", APP_VERSION, "Python + openpyxl + tkinter"]]
+    summary = [
+        ["구분", "건수", "비고"],
+        ["월확정 통합1라인 전체", line1_total, line1_path.name if line1_path else "파일 미선택"],
+        ["월확정 통합1라인 사용", len(line1), "선택 시 전체 사용"],
+        ["월확정 통합2라인 전체", line2_total, line2_path.name if line2_path else "파일 미선택"],
+        ["월확정 통합2라인 현대 제품", len(line2), "HX~/R~"],
+        ["월확정 통합2라인 DX 제외", dx_count, "예외목록 기록"],
+        ["자재소요 전체", material_total, material_path.name],
+        ["자재소요 KPA10/KSA10 카운터웨이트", len(material_line1), "통합1라인 매칭 대상"],
+        ["자재소요 KPA20/KSA20 카운터웨이트", len(material_line2), "통합2라인 매칭 대상"],
+        ["선택 라인 제외 자재", len(excluded_materials), "선택되지 않은 월확정 라인의 자재"],
+        ["정상 생산계획", len(plans), "생산계획 시트"],
+        ["예외", len(exceptions), "예외목록 시트"],
+        ["착수기간", period_label, "월확정 착수일 기준"],
+        ["앱 버전", APP_VERSION, "Python + openpyxl + tkinter"],
+    ]
     wb = Workbook()
     wb.remove(wb.active)
     write_sheet(wb, "생산계획", plans or [{c: "" for c in PLAN_COLUMNS}], PLAN_COLUMNS)
@@ -340,12 +369,7 @@ class PlannerGui(tk.Tk):
         self.geometry("1180x740")
         self.minsize(1040, 660)
         self.configure(bg="#f5f7fb")
-        self.files: dict[str, Path | None] = {
-            "line1": None,
-            "line2": None,
-            "material": None,
-            "output_dir": Path.home() / "Desktop",
-        }
+        self.files: dict[str, Path | None] = {"line1": None, "line2": None, "material": None, "output_dir": Path.home() / "Desktop"}
         self.last_output: Path | None = None
         self._build_styles()
         self._build_ui()
@@ -368,16 +392,13 @@ class PlannerGui(tk.Tk):
     def _build_ui(self) -> None:
         root = ttk.Frame(self, style="Root.TFrame", padding=24)
         root.pack(fill="both", expand=True)
-
         ttk.Label(root, text=APP_TITLE, style="Title.TLabel").pack(anchor="w")
         ttk.Label(root, text="월확정 통합1/2라인과 물류번호별 자재소요현황을 생산번호 기준으로 매칭해 생산계획 엑셀을 생성합니다.", style="Sub.TLabel").pack(anchor="w", pady=(6, 18))
-
         self.file_labels: dict[str, ttk.Label] = {}
-        self._file_panel(root, "line1", "1. 월확정조립서열계획 통합1라인", "선택 사항 · 선택 시 KPA10~ 카운터웨이트 자재와 매칭")
+        self._file_panel(root, "line1", "1. 월확정조립서열계획 통합1라인", "선택 사항 · 선택 시 KPA10~/KSA10~ 카운터웨이트 자재와 매칭")
         self._file_panel(root, "line2", "2. 월확정조립서열계획 통합2라인", "선택 사항 · HX~/R~ 현대 제품만 사용하고 DX~는 예외 처리")
-        self._file_panel(root, "material", "3. 물류번호별 자재소요현황", "필수 · KPA10~/KPA20~ 및 품명 카운터웨이트 포함 건만 사용")
+        self._file_panel(root, "material", "3. 물류번호별 자재소요현황", "필수 · KPA10~/KSA10~, KPA20~/KSA20~ 및 품명 카운터웨이트 포함 건만 사용")
         self._output_panel(root)
-
         action = ttk.Frame(root, style="Root.TFrame")
         action.pack(fill="x", pady=(14, 12))
         self.generate_btn = ttk.Button(action, text="생산계획 생성", style="Primary.TButton", command=self.generate)
@@ -387,20 +408,13 @@ class PlannerGui(tk.Tk):
         self.open_btn.pack(side="left", padx=(8, 0))
         self.status_var = tk.StringVar(value="월확정 1개 이상과 자재소요 파일을 선택하세요.")
         ttk.Label(action, textvariable=self.status_var, style="Sub.TLabel").pack(side="right")
-
         metrics = ttk.Frame(root, style="Root.TFrame")
         metrics.pack(fill="x", pady=(0, 12))
-        self.metric_vars = {
-            "plans": tk.StringVar(value="-"),
-            "exceptions": tk.StringVar(value="-"),
-            "period": tk.StringVar(value="-"),
-            "output": tk.StringVar(value="-"),
-        }
+        self.metric_vars = {"plans": tk.StringVar(value="-"), "exceptions": tk.StringVar(value="-"), "period": tk.StringVar(value="-"), "output": tk.StringVar(value="-")}
         self._metric_panel(metrics, "정상 생산계획", self.metric_vars["plans"], 0)
         self._metric_panel(metrics, "예외", self.metric_vars["exceptions"], 1)
         self._metric_panel(metrics, "착수기간", self.metric_vars["period"], 2)
         self._metric_panel(metrics, "출력 파일", self.metric_vars["output"], 3)
-
         table_box = ttk.Frame(root, style="Panel.TFrame", padding=12)
         table_box.pack(fill="both", expand=True)
         ttk.Label(table_box, text="생산계획 미리보기", style="PanelTitle.TLabel").pack(anchor="w", pady=(0, 8))
@@ -446,20 +460,18 @@ class PlannerGui(tk.Tk):
 
     def select_file(self, key: str) -> None:
         selected = filedialog.askopenfilename(title="엑셀 파일 선택", filetypes=[("Excel Workbook", "*.xlsx *.xlsm"), ("All files", "*.*")])
-        if not selected:
-            return
-        path = Path(selected)
-        self.files[key] = path
-        self.file_labels[key].configure(text=path.name)
-        self._update_state()
+        if selected:
+            path = Path(selected)
+            self.files[key] = path
+            self.file_labels[key].configure(text=path.name)
+            self._update_state()
 
     def select_output_dir(self) -> None:
         selected = filedialog.askdirectory(title="결과 저장 폴더 선택")
-        if not selected:
-            return
-        self.files["output_dir"] = Path(selected)
-        self.output_label.configure(text=selected)
-        self._update_state()
+        if selected:
+            self.files["output_dir"] = Path(selected)
+            self.output_label.configure(text=selected)
+            self._update_state()
 
     def _update_state(self) -> None:
         ready = bool((self.files["line1"] or self.files["line2"]) and self.files["material"] and self.files["output_dir"])
@@ -475,7 +487,6 @@ class PlannerGui(tk.Tk):
             self.status_var.set("처리 중 오류가 발생했습니다.")
             messagebox.showerror(APP_TITLE, str(exc))
             return
-
         self.last_output = output_path
         self.open_btn.configure(state="normal")
         self._load_result(output_path)
@@ -496,16 +507,14 @@ class PlannerGui(tk.Tk):
                 break
         self.metric_vars["period"].set(period)
         self.metric_vars["output"].set(output_path.name)
-
         for item in self.preview.get_children():
             self.preview.delete(item)
         headers = [cell.value for cell in next(plan_ws.iter_rows(min_row=1, max_row=1))]
         header_index = {header: i for i, header in enumerate(headers)}
         columns = list(self.preview["columns"])
         for row in plan_ws.iter_rows(min_row=2, values_only=True):
-            if not any(row):
-                continue
-            self.preview.insert("", "end", values=[row[header_index.get(column, -1)] if header_index.get(column, -1) >= 0 else "" for column in columns])
+            if any(row):
+                self.preview.insert("", "end", values=[row[header_index.get(column, -1)] if header_index.get(column, -1) >= 0 else "" for column in columns])
         wb.close()
 
     def open_result_folder(self) -> None:
