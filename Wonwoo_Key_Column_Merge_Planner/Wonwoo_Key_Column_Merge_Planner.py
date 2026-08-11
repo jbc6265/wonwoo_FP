@@ -3,9 +3,12 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
+from zipfile import BadZipFile
+import base64
 import os
 import subprocess
 import sys
+import tempfile
 import tkinter as tk
 import unicodedata
 from tkinter import filedialog, messagebox, ttk
@@ -14,7 +17,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 APP_TITLE = "원우ENG 서열정보&소요자재 자동 취합 프로그램"
-APP_VERSION = "20260731_radar_header_normalized"
+APP_VERSION = "20260811_excel_com_fallback"
 MONTHLY_SOURCE_KEYS = ("line1", "line2", "seonjin", "superlarge")
 ALL_SOURCE_KEYS = MONTHLY_SOURCE_KEYS + ("material",)
 MONTHLY_DEFAULT_COLUMNS = ("생산번호", "영업모델", "차대호기", "착수일", "CWT", "RADAR", "연번", "순번_2", "국가")
@@ -212,28 +215,80 @@ def unique_headers(headers: list[str]) -> list[str]:
     return result
 
 
+def excel_com_convert_to_xlsx(path: Path) -> Path:
+    if os.name != "nt":
+        raise RuntimeError('Excel 자동 변환은 Windows에서만 사용할 수 있습니다.')
+    output = Path(tempfile.gettempdir()) / f"wonwoo_excel_convert_{os.getpid()}_{datetime.now():%Y%m%d%H%M%S%f}.xlsx"
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$src = '{str(path).replace("'", "''")}'
+$dst = '{str(output).replace("'", "''")}'
+$excel = $null
+$workbook = $null
+try {{
+    $excel = New-Object -ComObject Excel.Application
+    $excel.Visible = $false
+    $excel.DisplayAlerts = $false
+    $workbook = $excel.Workbooks.Open($src, 0, $true)
+    $workbook.SaveAs($dst, 51)
+}} finally {{
+    if ($workbook -ne $null) {{ $workbook.Close($false) | Out-Null }}
+    if ($excel -ne $null) {{ $excel.Quit() | Out-Null }}
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+}}
+"""
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded]
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
+    if completed.returncode != 0 or not output.exists():
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(detail or 'Excel 변환 결과 파일을 생성하지 못했습니다.')
+    return output
+
+
+def open_workbook_with_fallback(path: Path):
+    try:
+        return load_workbook(path, data_only=True), None
+    except BadZipFile as exc:
+        try:
+            converted = excel_com_convert_to_xlsx(path)
+            return load_workbook(converted, data_only=True), converted
+        except Exception as fallback_exc:
+            raise ValueError(
+                '엑셀 파일을 직접 읽지 못했습니다. 파일이 DRM 보안 처리되었거나 표준 xlsx 구조가 아닐 수 있습니다. '
+                'PC에 Microsoft Excel이 설치되어 있으면 자동 변환을 시도하지만 실패했습니다. '
+                "Excel에서 파일을 열어 '다른 이름으로 저장(.xlsx)' 후 다시 선택하세요. "
+                f"원본 오류: {exc}; 변환 오류: {fallback_exc}"
+            ) from fallback_exc
+
+
 def read_source(path: Path, preferred_header_row: int, required: list[str]) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"파일을 찾을 수 없습니다: {path}")
+    if path.name.startswith("~$"):
+        raise ValueError('Excel 임시 잠금 파일(~$)은 선택할 수 없습니다. 원본 엑셀 파일을 선택하세요.')
     if path.suffix.lower() not in {".xlsx", ".xlsm"}:
-        raise ValueError(".xlsx 또는 .xlsm 파일만 지원합니다. .xls 파일은 xlsx로 저장 후 선택하세요.")
-    wb = load_workbook(path, data_only=True)
-    ws = wb.active
-    header_row = detect_header_row(ws, preferred_header_row, required)
-    raw_headers = [cell.value for cell in ws[header_row]]
-    last_header_index = max((index for index, header in enumerate(raw_headers) if clean(header)), default=-1)
-    if last_header_index < 0:
+        raise ValueError('.xlsx 또는 .xlsm 파일만 지원합니다. .xls 파일은 xlsx로 저장 후 선택하세요.')
+    wb, converted_path = open_workbook_with_fallback(path)
+    try:
+        ws = wb.active
+        header_row = detect_header_row(ws, preferred_header_row, required)
+        raw_headers = [cell.value for cell in ws[header_row]]
+        last_header_index = max((index for index, header in enumerate(raw_headers) if clean(header)), default=-1)
+        if last_header_index < 0:
+            raise ValueError('헤더가 비어 있습니다.')
+        headers = unique_headers(raw_headers[: last_header_index + 1])
+        rows = []
+        for row_no, values in enumerate(ws.iter_rows(min_row=header_row + 1, max_col=len(headers), values_only=True), header_row + 1):
+            values = list(values)
+            if any(text(value) for value in values):
+                rows.append({"row_number": row_no, "values": values})
+    finally:
         wb.close()
-        raise ValueError("헤더가 비어 있습니다.")
-    headers = unique_headers(raw_headers[: last_header_index + 1])
-    rows = []
-    for row_no, values in enumerate(ws.iter_rows(min_row=header_row + 1, max_col=len(headers), values_only=True), header_row + 1):
-        values = list(values)
-        if any(text(value) for value in values):
-            rows.append({"row_number": row_no, "values": values})
-    wb.close()
+        if converted_path:
+            converted_path.unlink(missing_ok=True)
     return {"path": path, "headers": headers, "rows": rows, "header_row": header_row}
-
 
 def find_col(headers: list[str], names: list[str]) -> int | None:
     targets = {clean(name).upper() for name in names}
