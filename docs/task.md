@@ -1,0 +1,6 @@
+- [x] 루트 디렉토리의 기존 구버전 파일들 삭제
+- [x] Wonwoo_Key_Column_Merge_Planner 디렉토리의 파일들을 루트 디렉토리로 이동
+- [x] 루트 README.md를 고도화 버전의 README.md로 대체
+- [x] 루트의 build_windows_exe.cmd 파일 수정 (PyInstaller 대상 업데이트)
+- [ ] 빈 폴더가 된 Wonwoo_Key_Column_Merge_Planner 디렉토리 삭제 (사용자 권한 문제로 보류, 수동 삭제 권장)
+- [x] 구조 변경 후 작동 확인 및 최종 검증

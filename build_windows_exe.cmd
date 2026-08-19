@@ -8,9 +8,9 @@ py -3 -m PyInstaller ^
   --noconfirm ^
   --onefile ^
   --windowed ^
-  --name "원우ENG_CWT_생산계획_프로그램" ^
-  "Wonwoo_CWT_Planner_Python.py"
+  --name "원우ENG_서열정보_소요자재_자동_취합_프로그램" ^
+  "Wonwoo_Key_Column_Merge_Planner.py"
 
 echo.
-echo Build complete: dist\원우ENG_CWT_생산계획_프로그램.exe
+echo Build complete: dist\원우ENG_서열정보_소요자재_자동_취합_프로그램.exe
 pause
