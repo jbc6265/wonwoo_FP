@@ -17,7 +17,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 APP_TITLE = "원우ENG 서열정보&소요자재 자동 취합 프로그램"
-APP_VERSION = "20260811_excel_com_fallback"
+APP_VERSION = "20260819_seonjin_wx_included"
 MONTHLY_SOURCE_KEYS = ("line1", "line2", "seonjin", "superlarge")
 ALL_SOURCE_KEYS = MONTHLY_SOURCE_KEYS + ("material",)
 MONTHLY_DEFAULT_COLUMNS = ("생산번호", "영업모델", "차대호기", "착수일", "CWT", "RADAR", "연번", "순번_2", "국가")
@@ -319,15 +319,20 @@ def exception(kind, source, key, reason) -> dict:
 
 def model_exclusion(source_key: str, model_value) -> tuple[str, str] | None:
     model = clean(model_value).upper()
+    if source_key == "superlarge" and model.startswith(("HX1000", "DX1000", "DX800")):
+        return (
+            "초대형 비대상 모델 제외",
+            "초대형 라인 HX1000, DX1000, DX800 모델은 원우ENG 생산 카운터웨이트 대상이 아니므로 병합에서 제외합니다.",
+        )
     if model.startswith("DX"):
         return (
             "DX 제품 제외",
             f"{SOURCE_LABELS[source_key]}의 DX~ 디벨론 제품은 원우ENG 자재소요현황 조회 대상에서 제외합니다.",
         )
-    if source_key == "seonjin" and model.startswith("WX"):
+    if source_key == "seonjin" and ("ACR" in model or "ECR" in model):
         return (
-            "WX 제품 제외",
-            "선진정공 WX~ 모델은 원우ENG 생산 대상이 아니므로 병합에서 제외합니다.",
+            "ACR/ECR 제품 제외",
+            "선진정공 ACR(주물 카운터웨이트), ECR(전기굴착기) 모델은 원우ENG 생산 카운터웨이트 대상이 아니므로 병합에서 제외합니다.",
         )
     return None
 
@@ -446,6 +451,9 @@ def merge_sources(monthly_sources: dict[str, dict | None], material_source: dict
         elif canonical_output_name(header) is None:
             material_header_pairs.append((index, out_name))
 
+    if "비고" not in output_headers:
+        output_headers.append("비고")
+
     material_indexed = index_materials(material_source, material_key, exceptions)
     known_monthly_keys = set()
     included_monthly_rows = []
@@ -481,22 +489,24 @@ def merge_sources(monthly_sources: dict[str, dict | None], material_source: dict
         if monthly_start != "9999-12-31":
             plan_start_dates.append(monthly_start)
         matches = material_indexed.get(key, [])
+        material_row = None
+        remark = ""
         if not matches:
-            exceptions.append(exception("자재소요 미매칭", SOURCE_LABELS[source_key], key, "생산번호와 일치하는 물류번호가 자재소요현황에 없습니다."))
-            continue
-        material_row = choose_material_row(key, matches, material_name_key, exceptions)
-        if material_row is None:
-            continue
-        material_start = sort_date_value(value_at(material_row, material_start_key)) if material_start_key is not None else ""
-        if material_start_key is not None and monthly_start != "9999-12-31" and material_start and monthly_start != material_start:
-            exceptions.append(exception("착수일 불일치", SOURCE_LABELS[source_key], key, f"월확정서열 착수일({monthly_start})과 자재소요 착수일자({material_start})가 다릅니다."))
+            remark = "생산번호와 일치하는 물류번호가 자재소요현황에 없습니다"
+        else:
+            material_row = choose_material_row(key, matches, material_name_key, exceptions)
+            if material_row is None:
+                continue
         output = {header: "" for header in output_headers}
         output["조립라인"] = SOURCE_LABELS[source_key].replace("월확정서열 ", "")
         for pair_key, index, out_name in monthly_header_pairs:
             if pair_key == source_key:
                 output[out_name] = display_value(value_at(row, index))
-        for index, out_name in material_header_pairs:
-            output[out_name] = display_value(value_at(material_row, index))
+        if material_row is not None:
+            for index, out_name in material_header_pairs:
+                output[out_name] = display_value(value_at(material_row, index))
+        if remark:
+            output["비고"] = remark
         output["__sort_start_date"] = monthly_start
         output["__sort_source"] = SOURCE_LABELS[source_key]
         output["__sort_key"] = key
@@ -532,7 +542,6 @@ def merge_sources(monthly_sources: dict[str, dict | None], material_source: dict
     summary.append(["자재소요현황", len(material_source["rows"]), material_source["path"].name])
     summary.append(["자재소요현황 선택 컬럼", len(selected_material_headers), ", ".join(selected_material_headers)])
     summary.append(["DX 제품 제외", sum(count for (_key, kind), count in exclusion_counts.items() if kind == "DX 제품 제외"), "전체 월확정서열 라인"])
-    summary.append(["WX 제품 제외", sum(count for (_key, kind), count in exclusion_counts.items() if kind == "WX 제품 제외"), "선진정공만 적용"])
     summary.append(["정상 병합", len(merged_rows), "병합결과 시트"])
     summary.append(["예외", len(exceptions), "예외목록 시트"])
     summary.append(["앱 버전", APP_VERSION, "Python + openpyxl + tkinter"])
